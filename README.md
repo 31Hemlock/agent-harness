@@ -1,4 +1,4 @@
-# AI sandbox
+# Agent Harness
 
 > Significant portions of this codebase and README were written by AI.
 
