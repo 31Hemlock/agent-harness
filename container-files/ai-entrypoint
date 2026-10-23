@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+mkdir -p /home/node/.codex /home/node/.claude /workspace
+touch /home/node/.zshrc
+
+# Codex config lives in the mounted /home/node/.codex Docker volume.
+# Initialize it only if the volume does not already have a config.
+#
+# This makes plain `codex` inside the container use Docker as the real
+# sandbox boundary instead of trying to create a nested bubblewrap sandbox.
+if [ ! -f /home/node/.codex/config.toml ]; then
+  cat > /home/node/.codex/config.toml <<'CONFIG'
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
+allow_login_shell = false
+CONFIG
+fi
+
+if [ "${AI_WORKSPACE_WATCHDOG:-1}" != "0" ]; then
+  /opt/ai-guards/bin/workspace-watchdog "$$" /workspace &
+fi
+
+exec "$@"

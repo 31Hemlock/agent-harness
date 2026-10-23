@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+target_pid="${1:-1}"
+workspace="${2:-/workspace}"
+
+max_bytes="${AI_WORKSPACE_MAX_FILE_BYTES:-1073741824}"
+scan_interval="${AI_WORKSPACE_WATCHDOG_INTERVAL:-1}"
+
+restricted_ext_regex='.*\.(zip|zipx|7z|rar|tar|tgz|tar\.gz|tar\.bz2|tbz2|tar\.xz|txz|gz|bz2|xz|lz|lzma|zst|br|iso|img)$'
+
+export LC_ALL=C
+
+baseline_archives="$(mktemp -t ai-watchdog-archives-baseline.XXXXXX)"
+current_archives="$(mktemp -t ai-watchdog-archives-current.XXXXXX)"
+
+cleanup() {
+  rm -f "$baseline_archives" "$current_archives"
+}
+
+trap cleanup EXIT
+
+restricted_exit() {
+  reason="$1"
+  path="$2"
+  size="${3:-unknown}"
+
+  {
+    echo
+    echo "============================================================"
+    echo "RESTRICTED ACTION DETECTED"
+    echo "Reason: $reason"
+    echo "Path:   $path"
+    echo "Size:   $size bytes"
+    echo
+    echo "Stopping AI sandbox immediately."
+    echo "============================================================"
+    echo
+  } >&2
+
+  kill -TERM "$target_pid" 2>/dev/null || true
+  sleep 0.25
+  kill -KILL "$target_pid" 2>/dev/null || true
+
+  # Also kill any same-user child/helper processes. This is intentionally blunt.
+  kill -TERM -1 2>/dev/null || true
+  sleep 0.25
+  kill -KILL -1 2>/dev/null || true
+
+  exit 126
+}
+
+emit_archive_signatures() {
+  find "$workspace" \
+    -path "$workspace/.git" -prune -o \
+    -path "$workspace/node_modules" -prune -o \
+    -type f \
+    -regextype posix-extended \
+    -iregex "$restricted_ext_regex" \
+    -print0 2>/dev/null \
+  | while IFS= read -r -d '' file; do
+      size="$(stat -c '%s' -- "$file" 2>/dev/null || echo unknown)"
+      mtime="$(stat -c '%Y' -- "$file" 2>/dev/null || echo unknown)"
+      printf '%s\t%s\t%s\n' "$file" "$size" "$mtime"
+    done \
+  | sort
+}
+
+write_archive_baseline() {
+  if [ ! -d "$workspace" ]; then
+    restricted_exit "workspace disappeared" "$workspace" "unknown"
+  fi
+
+  emit_archive_signatures > "$baseline_archives"
+}
+
+scan_archives() {
+  emit_archive_signatures > "$current_archives"
+
+  changed_line="$(comm -13 "$baseline_archives" "$current_archives" | head -n 1 || true)"
+
+  if [ -n "$changed_line" ]; then
+    path="$(printf '%s\n' "$changed_line" | cut -f1)"
+    size="$(printf '%s\n' "$changed_line" | cut -f2)"
+    restricted_exit "new or changed restricted archive/compressed file" "$path" "$size"
+  fi
+}
+
+scan_large_files() {
+  while IFS= read -r -d '' file; do
+    restricted_exit "file exceeds ${max_bytes} byte limit" "$file" "$(stat -c '%s' -- "$file" 2>/dev/null || echo unknown)"
+  done < <(
+    find "$workspace" \
+      -path "$workspace/.git" -prune -o \
+      -path "$workspace/node_modules" -prune -o \
+      -type f \
+      -size +"${max_bytes}"c \
+      -print0 2>/dev/null
+  )
+}
+
+write_archive_baseline
+
+while kill -0 "$target_pid" 2>/dev/null; do
+  scan_archives
+  scan_large_files
+  sleep "$scan_interval"
+done

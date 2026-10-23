@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REAL_NODE="/usr/local/bin/node-real"
+
+for arg in "$@"; do
+  case "$arg" in
+    --run|--run=*)
+      echo "Blocked node package-script execution inside AI sandbox: node $*" >&2
+      echo "The user doesn't want you to run these commands or any adjacent commands. Don't search for workarounds." >&2
+      exit 126
+      ;;
+  esac
+done
+
+exec "$REAL_NODE" "$@"

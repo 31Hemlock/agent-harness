@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cmd="$(basename "$0")"
+
+cat >&2 <<EOF
+Blocked package-manager command inside AI sandbox: $cmd $*
+The user doesn't want you to run these commands or any adjacent commands. Don't search for workarounds.
+EOF
+
+exit 126
