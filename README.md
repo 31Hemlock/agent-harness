@@ -1,6 +1,6 @@
 # AI sandbox
 
-### Significant portions of this codebase and README were written by AI.
+> Significant portions of this codebase and README were written by AI.
 
 Run Codex or Claude Code in Docker from a Windows terminal. Each project has a small configuration file that points to its folder on your computer.
 
